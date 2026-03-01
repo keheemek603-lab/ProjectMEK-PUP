@@ -1,4 +1,4 @@
-// server.js (FINAL FIX)
+// server.js (RENDER + VERCEL FIX)
 const path = require("path");
 const express = require("express");
 const bcrypt = require("bcryptjs");
@@ -9,15 +9,29 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const JWT_SECRET = process.env.JWT_SECRET || "change_me_super_secret";
 
-const pool = new Pool({
-  host: process.env.DB_HOST || "localhost",
-  port: Number(process.env.DB_PORT || 5432),
-  user: process.env.DB_USER || "postgres",
-  password: process.env.DB_PASSWORD || "",
-  database: process.env.DB_NAME || "postgres",
+// ---------- CORS (ให้ Vercel เรียก Render ได้) ----------
+const ALLOW_ORIGINS = new Set([
+  "https://project-mek-pup.vercel.app", // <-- โดเมน Vercel ของมึง
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+]);
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+
+  if (origin && ALLOW_ORIGINS.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
 });
 
-// ✅ BODY PARSER (กันทุกเคส + เก็บ rawBody)
+// ---------- BODY PARSER ----------
 app.use(
   express.json({
     limit: "2mb",
@@ -29,7 +43,22 @@ app.use(
 );
 app.use(express.urlencoded({ extended: true }));
 
-// เสิร์ฟไฟล์หน้าเว็บจาก root
+// ---------- DB (ใช้ DATABASE_URL ของ Render) ----------
+const pool = process.env.DATABASE_URL
+  ? new Pool({
+      connectionString: process.env.DATABASE_URL,
+      // Render Postgres ใช้ SSL (ปลอดภัยสุดเปิดไว้เลย)
+      ssl: { rejectUnauthorized: false },
+    })
+  : new Pool({
+      host: process.env.DB_HOST || "localhost",
+      port: Number(process.env.DB_PORT || 5432),
+      user: process.env.DB_USER || "postgres",
+      password: process.env.DB_PASSWORD || "",
+      database: process.env.DB_NAME || "postgres",
+    });
+
+// ---------- STATIC ----------
 app.use(express.static(__dirname));
 app.use("/assets", express.static(path.join(__dirname, "assets")));
 
@@ -49,12 +78,14 @@ function auth(req, res, next) {
   }
 }
 
+// ---------- HEALTH ----------
 app.get("/api/health", async (req, res) => {
   try {
     const r = await pool.query("SELECT NOW() as now");
     res.json({ ok: true, dbTime: r.rows[0].now });
-  } catch {
-    res.status(500).json({ ok: false, error: "DB connection failed" });
+  } catch (e) {
+    console.error("HEALTH DB ERROR:", e?.message || e);
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 });
 
@@ -77,8 +108,9 @@ app.post("/api/auth/register", async (req, res) => {
 
     const user = created.rows[0];
     res.json({ token: signToken(user), user });
-  } catch {
-    res.status(500).json({ error: "Register failed" });
+  } catch (e) {
+    console.error("REGISTER ERROR:", e?.message || e);
+    res.status(500).json({ error: "Register failed", detail: String(e?.message || e) });
   }
 });
 
@@ -95,8 +127,9 @@ app.post("/api/auth/login", async (req, res) => {
     if (!ok) return res.status(401).json({ error: "Invalid credentials" });
 
     res.json({ token: signToken(user), user: { id: user.id, username: user.username } });
-  } catch {
-    res.status(500).json({ error: "Login failed" });
+  } catch (e) {
+    console.error("LOGIN ERROR:", e?.message || e);
+    res.status(500).json({ error: "Login failed", detail: String(e?.message || e) });
   }
 });
 
@@ -123,31 +156,23 @@ app.get("/api/quiz/questions", auth, async (req, res) => {
     }));
 
     res.json({ questions });
-  } catch {
+  } catch (e) {
+    console.error("QUESTIONS ERROR:", e?.message || e);
     res.status(500).json({ error: "Failed to load questions" });
   }
 });
 
-// ✅ SUBMIT (กัน body หาย: fallback parse จาก rawBody)
 app.post("/api/quiz/submit", auth, async (req, res) => {
   try {
     let body = req.body;
 
-    // ถ้า req.body เป็น string หรือ {} แต่ rawBody มี ให้พยายาม parse เอง
     if ((typeof body === "string" || !body || Object.keys(body).length === 0) && req.rawBody) {
       try {
         body = JSON.parse(req.rawBody);
-      } catch {
-        // ignore
-      }
+      } catch {}
     }
 
     const answers = Array.isArray(body?.answers) ? body.answers : [];
-
-    // LOG ชัด ๆ (ช่วยจับได้ทันทีถ้ายังพัง)
-    console.log("SUBMIT content-type:", req.headers["content-type"]);
-    console.log("SUBMIT answers length:", answers.length);
-
     if (!answers.length) return res.status(400).json({ error: "answers required" });
     if (answers.length > 50) return res.status(400).json({ error: "too many answers" });
 
@@ -183,7 +208,7 @@ app.post("/api/quiz/submit", auth, async (req, res) => {
       },
     });
   } catch (e) {
-    console.error("SUBMIT ERROR:", e);
+    console.error("SUBMIT ERROR:", e?.message || e);
     res.status(500).json({ error: "Submit failed" });
   }
 });
@@ -204,7 +229,8 @@ app.get("/api/scoreboard", async (req, res) => {
       [limit]
     );
     res.json({ rows: r.rows });
-  } catch {
+  } catch (e) {
+    console.error("SCOREBOARD ERROR:", e?.message || e);
     res.status(500).json({ error: "Failed to load scoreboard" });
   }
 });
@@ -214,16 +240,4 @@ app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "index.html"));
 });
 
-app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
-
-import cors from "cors";
-
-app.use(cors({
-  origin: [
-    "https://project-mek-pup.vercel.app",
-    "http://localhost:3000"
-  ],
-  methods: ["GET","POST","PUT","DELETE","OPTIONS"],
-  allowedHeaders: ["Content-Type","Authorization"],
-}));
-app.options("*", cors());
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
