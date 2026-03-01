@@ -618,3 +618,11 @@
     }
   });
 })();
+
+const API_BASE = "https://projectmek-pup.onrender.com";
+
+fetch(`${API_BASE}/api/auth/register`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ username, password })
+});

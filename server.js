@@ -215,3 +215,15 @@ app.get("*", (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+
+import cors from "cors";
+
+app.use(cors({
+  origin: [
+    "https://project-mek-pup.vercel.app",
+    "http://localhost:3000"
+  ],
+  methods: ["GET","POST","PUT","DELETE","OPTIONS"],
+  allowedHeaders: ["Content-Type","Authorization"],
+}));
+app.options("*", cors());

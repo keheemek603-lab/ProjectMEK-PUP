@@ -1,8 +1,5 @@
 {
   "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "https://projectmek-pup.onrender.com/api/$1"
-    }
+    { "source": "/api/(.*)", "destination": "https://projectmek-pup.onrender.com/api/$1" }
   ]
 }
