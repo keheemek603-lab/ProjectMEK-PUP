@@ -1,0 +1,42 @@
+services:
+  db:
+    image: postgres:16
+    container_name: itquiz_db
+    environment:
+      POSTGRES_USER: itquiz
+      POSTGRES_PASSWORD: itquizpass
+      POSTGRES_DB: itquiz
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U itquiz -d itquiz"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    image: node:20-alpine
+    container_name: itquiz_app
+    working_dir: /app
+    volumes:
+      - ./:/app
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: itquiz
+      DB_PASSWORD: itquizpass
+      DB_NAME: itquiz
+      JWT_SECRET: "change_me_super_secret"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c "npm install && node server.js"
+
+volumes:
+  pgdata:

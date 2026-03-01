@@ -1,0 +1,480 @@
+/* ==============================
+   IT LIBRARY (MEK & PUP) - Classic style, prettier
+   Drop-in replacement for your original CSS
+   ============================== */
+
+/* ---------- Theme tokens (same vibe) ---------- */
+:root{
+  --green:#1e8e3e;
+  --green2:#22c55e;
+
+  --bg:#f6fff6;
+  --surface:#ffffff;
+  --surface2:#f7fff7;
+
+  --ink:#15311d;
+  --muted:#55665b;
+
+  --line:#cfe9cf;
+  --line2:#e6f6e6;
+
+  --shadow: 0 10px 24px rgba(0,0,0,.10);
+  --shadow2: 0 18px 45px rgba(0,0,0,.12);
+
+  --radius: 14px;
+  --radius2: 12px;
+
+  --focus: 0 0 0 3px rgba(34,197,94,.22);
+
+  --code-bg:#0b1220;
+  --code-ink:#000000;
+  --code-line:#24324d;
+}
+
+/* Optional dark mode (if you ever toggle data-theme="dark") */
+[data-theme="dark"]{
+  --bg:#07130a;
+  --surface:#0b1b10;
+  --surface2:#0e2215;
+  --ink:#e7ffe9;
+  --muted:#b2d8bc;
+  --line:#1b3d25;
+  --line2:#15331f;
+  --shadow: 0 14px 40px rgba(0,0,0,.45);
+  --shadow2: 0 22px 60px rgba(0,0,0,.55);
+
+  --code-bg:#070b14;
+  --code-ink:#e8eefc;
+  --code-line:#1b2640;
+}
+
+/* ---------- Base ---------- */
+*{ box-sizing:border-box; }
+html{ scroll-behavior:smooth; }
+body{
+  margin:0;
+  font-family: ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,"Noto Sans Thai","Sarabun",Tahoma,Arial;
+  background:
+    radial-gradient(900px 420px at 10% -10%, rgba(34,197,94,.10), transparent 60%),
+    radial-gradient(900px 520px at 95% 0%, rgba(30,142,62,.10), transparent 55%),
+    var(--bg);
+  color:var(--ink);
+  line-height:1.7;
+}
+a{ color: inherit; }
+
+/* ---------- Topbar (same structure, nicer) ---------- */
+.topbar{
+  position:sticky;
+  top:0;
+  z-index:40;
+
+  display:flex;
+  align-items:center;
+  gap:.65rem;
+
+  padding:.55rem .75rem;
+
+  background: color-mix(in oklab, var(--surface) 88%, transparent);
+  backdrop-filter:saturate(120%) blur(10px);
+  border-bottom:1px solid color-mix(in oklab, var(--line2) 70%, transparent);
+}
+
+.topbar .brand{
+  display:flex;
+  align-items:center;
+  gap:.55rem;
+  font-weight: 900;
+  letter-spacing:.2px;
+  color: var(--green);
+}
+
+.topbar img{
+  width:32px;
+  height:32px;
+  border-radius:50%;
+  border:2px solid color-mix(in oklab, var(--green2) 40%, transparent);
+  box-shadow: 0 6px 18px rgba(34,197,94,.12);
+}
+
+.topbar input[type="search"]{
+  margin-left:auto;
+  padding:.55rem .75rem;
+  border:1px solid var(--line);
+  border-radius: 12px;
+  min-width: 240px;
+
+  background: var(--surface);
+  color: var(--ink);
+  outline:none;
+  transition: box-shadow .15s ease, border-color .15s ease, transform .15s ease;
+}
+.topbar input[type="search"]::placeholder{ color: color-mix(in oklab, var(--muted) 75%, transparent); }
+.topbar input[type="search"]:focus{
+  box-shadow: var(--focus);
+  border-color: color-mix(in oklab, var(--green) 55%, var(--line));
+}
+
+/* If your HTML has buttons in topbar, make them pretty automatically */
+.topbar button,
+.topbar .btn{
+  border:1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  padding: .48rem .65rem;
+  border-radius: 12px;
+  cursor:pointer;
+  font-weight: 800;
+  transition: transform .12s ease, background .12s ease, box-shadow .12s ease;
+}
+.topbar button:hover,
+.topbar .btn:hover{
+  transform: translateY(-1px);
+  background: color-mix(in oklab, var(--surface) 86%, var(--green2));
+}
+.topbar button:active,
+.topbar .btn:active{ transform: translateY(0); }
+.topbar button:focus,
+.topbar .btn:focus{ outline:none; box-shadow: var(--focus); }
+
+/* ---------- Hero (keep your image, upgrade typography overlay) ---------- */
+.hero{
+  position:relative;
+  color:#fff;
+  padding: 44px 16px;
+  background-position:center;
+  background-size:cover;
+}
+.hero::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:
+    linear-gradient(180deg, rgba(0,0,0,.18), rgba(0,0,0,.60));
+}
+.hero > *{ position:relative; z-index:1; }
+
+.hero h1{
+  margin:.15rem 0 .35rem;
+  font-size: clamp(22px, 3vw, 36px);
+  letter-spacing:.2px;
+}
+.hero p{
+  margin:0;
+  max-width: 1000px;
+  opacity:.92;
+}
+
+/* ---------- Shell layout (same as original but nicer spacing) ---------- */
+.shell{
+  display:grid;
+  grid-template-columns: 280px 1fr;
+  gap: 14px;
+
+  max-width: 1380px;
+  margin: 14px auto;
+  padding: 0 12px 40px;
+}
+.sidebar{
+  position: sticky;
+  top: 60px;
+  align-self: start;
+}
+
+/* Main content container (if you have .card / #content style) */
+.card, #content{
+  background: var(--surface);
+  border: 1px solid var(--line2);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 14px 16px;
+}
+
+/* Placeholder */
+.placeholder{
+  color: var(--muted);
+  font-weight: 800;
+}
+
+/* ---------- Sidebar boxes ---------- */
+.box{
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius2);
+  margin-bottom: 10px;
+  position: relative;
+  overflow: visible;
+  box-shadow: 0 8px 18px rgba(0,0,0,.06);
+}
+
+.box h4{
+  margin:0;
+  padding:.58rem .7rem;
+
+  background:
+    linear-gradient(180deg,
+      color-mix(in oklab, var(--surface2) 85%, var(--green2)),
+      color-mix(in oklab, var(--surface) 92%, transparent)
+    );
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  color: color-mix(in oklab, var(--green) 90%, var(--ink));
+  letter-spacing: .6px;
+  text-transform: uppercase;
+}
+
+.box a.main{
+  display:block;
+  padding: .55rem .7rem;
+  border-bottom: 1px dashed color-mix(in oklab, var(--line2) 80%, transparent);
+
+  text-decoration:none;
+  color: color-mix(in oklab, var(--ink) 80%, var(--green));
+  font-size: 14px;
+  font-weight: 800;
+  cursor:pointer;
+  user-select:none;
+  transition: background .12s ease, transform .12s ease;
+}
+.box a.main:hover{
+  background: color-mix(in oklab, var(--green2) 10%, var(--surface));
+  transform: translateY(-1px);
+}
+.box a.main:active{ transform: translateY(0); }
+
+/* ---------- Flyout (same behavior, prettier + no-gap bridge) ---------- */
+.flyout{
+  position:absolute;
+  left: calc(100% - 2px);
+  top: -6px;
+
+  min-width: 290px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius2);
+  box-shadow: var(--shadow2);
+
+  display:none;
+  padding: 8px;
+}
+
+/* bridge to prevent hover gap */
+.flyout::before{
+  content:"";
+  position:absolute;
+  left:-10px; top:0;
+  width: 12px;
+  height: 100%;
+  background: transparent;
+}
+
+.flyout a.sub{
+  display:block;
+  padding: .52rem .6rem;
+  border-radius: 10px;
+
+  text-decoration:none;
+  color: var(--ink);
+  font-weight: 800;
+  font-size: 14px;
+
+  transition: background .12s ease, transform .12s ease;
+}
+.flyout a.sub:hover{
+  background: color-mix(in oklab, var(--green2) 10%, var(--surface));
+  transform: translateX(2px);
+}
+
+/* Desktop hover open (same concept) */
+@media (hover:hover) and (pointer:fine){
+  .box:hover .flyout{ display:block; }
+}
+
+/* Mobile tap open (your JS can toggle .open) */
+.box.open .flyout{ display:block; }
+
+/* ---------- Topics (content) ---------- */
+.topic{ display:none; }
+.topic h2{
+  margin: .2rem 0 .7rem;
+  padding-bottom: .45rem;
+  border-bottom: 1px solid color-mix(in oklab, var(--line2) 70%, transparent);
+  letter-spacing: .2px;
+}
+.topic h3{
+  margin: 1.1rem 0 .35rem;
+  color: color-mix(in oklab, var(--ink) 78%, var(--green));
+}
+.topic p{ margin: .35rem 0; }
+.topic ul{ margin: .4rem 0 .4rem 1.15rem; }
+.topic li{ margin: .18rem 0; }
+
+/* images/figures */
+figure{ margin: 12px 0; }
+img{ max-width:100%; height:auto; border-radius: 12px; box-shadow: 0 10px 20px rgba(0,0,0,.08); }
+
+/* ---------- Code blocks (you have many <pre><code>) ---------- */
+pre{
+  background: var(--code-bg);
+  color: var(--code-ink);
+  border: 1px solid var(--code-line);
+  border-radius: 14px;
+  padding: 12px;
+  overflow:auto;
+  box-shadow: 0 14px 28px rgba(0,0,0,.20);
+}
+code{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+}
+
+/* Inline code if your content uses <code> outside <pre> */
+.topic p > code,
+.topic li > code{
+  padding: .12rem .35rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+  background: color-mix(in oklab, var(--surface2) 75%, transparent);
+}
+
+/* ---------- Nice selection ---------- */
+::selection{
+  background: rgba(34,197,94,.22);
+}
+
+/* ---------- Responsive (keep original behavior, cleaner) ---------- */
+@media (max-width: 980px){
+  .shell{ grid-template-columns: 1fr; }
+  .sidebar{ position: relative; top:auto; }
+
+  /* flyout becomes inline panel */
+  .flyout{
+    position: relative;
+    left:auto;
+    top:auto;
+    min-width: auto;
+    margin: 8px;
+    display:none;
+    box-shadow: var(--shadow);
+  }
+  .box.open .flyout{ display:block; }
+
+  .topbar input[type="search"]{ min-width: 160px; }
+}
+
+/* Small screens */
+@media (max-width: 560px){
+  .topbar{ flex-wrap: wrap; }
+  .topbar input[type="search"]{ width:100%; margin-left:0; }
+}
+
+.quiz-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:14px}
+.quiz-panel{background:#fff;border:1px solid #dbece0;border-radius:14px;padding:14px;box-shadow:0 10px 24px rgba(0,0,0,.08)}
+.quiz-row{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.quiz-label{font-weight:800;color:#1e8e3e}
+.quiz-input{padding:10px 12px;border:1px solid #cfe9cf;border-radius:12px;outline:none}
+.quiz-input:focus{box-shadow:0 0 0 3px rgba(34,197,94,.18)}
+.quiz-actions{display:flex;gap:10px;flex-wrap:wrap}
+.quiz-btn{padding:10px 12px;border:1px solid #cfe9cf;border-radius:12px;background:#1e8e3e;color:#fff;font-weight:900;cursor:pointer}
+.quiz-btn.ghost{background:#fff;color:#15311d}
+.quiz-btn:disabled{opacity:.55;cursor:not-allowed}
+.quiz-hr{border:none;border-top:1px solid #e6f6e6;margin:12px 0}
+.quiz-stage{min-height:220px}
+.qbox{border:1px solid #e6f6e6;border-radius:14px;padding:12px}
+.qmeta{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.qtitle{font-weight:900;margin:8px 0}
+.opts{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.opt{border:1px solid #e6f6e6;border-radius:12px;padding:10px;cursor:pointer}
+.opt:hover{background:#f6fff6}
+.opt input{margin-right:8px}
+.qfooter{display:flex;justify-content:space-between;align-items:center;margin-top:12px;gap:10px;flex-wrap:wrap}
+.small{font-size:12px}
+.muted{color:#55665b}
+.lb-table{width:100%;border-collapse:collapse;margin-top:10px}
+.lb-table th,.lb-table td{border-bottom:1px solid #e6f6e6;padding:8px;text-align:left}
+@media (max-width: 980px){.quiz-grid{grid-template-columns:1fr}}
+
+/* ===== Image Carousel ===== */
+.img-carousel{
+  position: relative;
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid rgba(0,0,0,.08);
+  border-radius: 14px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.img-frame{
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.img-main{
+  width: 100%;
+  max-width: 980px;
+  height: auto;
+  max-height: 420px;   /* ปรับสูง/เตี้ยได้ */
+  object-fit: contain; /* ให้รูปพอดีกรอบ ไม่โดนตัด */
+  border-radius: 12px;
+  background: #fff;
+}
+
+.img-nav{
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  border: 1px solid rgba(0,0,0,.12);
+  background: rgba(255,255,255,.9);
+  cursor: pointer;
+  font-size: 26px;
+  line-height: 38px;
+  text-align: center;
+  user-select: none;
+}
+
+.img-nav:hover{ filter: brightness(0.98); }
+.img-nav.prev{ left: 12px; }
+.img-nav.next{ right: 12px; }
+
+.img-meta{
+  margin-top: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  opacity: .85;
+}
+
+.img-dots{
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.img-dot{
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(0,0,0,.25);
+  background: transparent;
+  cursor: pointer;
+}
+
+.img-dot.active{
+  background: rgba(0,0,0,.5);
+}
+
+.img-caption{
+  margin-top: 8px;
+  font-size: 20px;
+  opacity: .75;
+}
