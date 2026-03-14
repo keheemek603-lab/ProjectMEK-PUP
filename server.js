@@ -1,4 +1,3 @@
-// server.js (RENDER + VERCEL FIX)
 const path = require("path");
 const express = require("express");
 const bcrypt = require("bcryptjs");
@@ -9,16 +8,14 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const JWT_SECRET = process.env.JWT_SECRET || "change_me_super_secret";
 
-// ---------- CORS (ให้ Vercel เรียก Render ได้) ----------
 const ALLOW_ORIGINS = new Set([
-  "https://project-mek-pup.vercel.app", // <-- โดเมน Vercel ของมึง
+  "https://project-mek-pup.vercel.app",
   "http://localhost:3000",
   "http://127.0.0.1:3000",
 ]);
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-
   if (origin && ALLOW_ORIGINS.has(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
@@ -26,28 +23,24 @@ app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
 
-// ---------- BODY PARSER ----------
 app.use(
   express.json({
     limit: "2mb",
     type: ["application/json", "application/*+json", "text/json", "*/*"],
-    verify: (req, res, buf) => {
+    verify: (req, _res, buf) => {
       req.rawBody = buf?.toString?.("utf8") || "";
     },
   })
 );
 app.use(express.urlencoded({ extended: true }));
 
-// ---------- DB (ใช้ DATABASE_URL ของ Render) ----------
 const pool = process.env.DATABASE_URL
   ? new Pool({
       connectionString: process.env.DATABASE_URL,
-      // Render Postgres ใช้ SSL (ปลอดภัยสุดเปิดไว้เลย)
       ssl: { rejectUnauthorized: false },
     })
   : new Pool({
@@ -58,7 +51,6 @@ const pool = process.env.DATABASE_URL
       database: process.env.DB_NAME || "postgres",
     });
 
-// ---------- STATIC ----------
 app.use(express.static(__dirname));
 app.use("/assets", express.static(path.join(__dirname, "assets")));
 
@@ -66,20 +58,168 @@ function signToken(user) {
   return jwt.sign({ uid: user.id, username: user.username }, JWT_SECRET, { expiresIn: "7d" });
 }
 
-function auth(req, res, next) {
+function parseToken(req) {
   const header = req.headers.authorization || "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : header;
+  return header.startsWith("Bearer ") ? header.slice(7) : header;
+}
+
+function auth(req, res, next) {
+  const token = parseToken(req);
   if (!token) return res.status(401).json({ error: "Missing token" });
   try {
     req.user = jwt.verify(token, JWT_SECRET);
-    return next();
+    next();
   } catch {
-    return res.status(401).json({ error: "Invalid token" });
+    res.status(401).json({ error: "Invalid token" });
   }
 }
 
-// ---------- HEALTH ----------
-app.get("/api/health", async (req, res) => {
+function optionalAuth(req, _res, next) {
+  const token = parseToken(req);
+  if (!token) return next();
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+  } catch {
+    req.user = null;
+  }
+  next();
+}
+
+function safeInt(v, fallback = null) {
+  const n = Number(v);
+  return Number.isInteger(n) ? n : fallback;
+}
+
+function trimText(v) {
+  return String(v ?? "").trim();
+}
+
+async function loadPosts(viewerId, { postId = null, userId = null, mine = false, limit = 30 } = {}) {
+  const params = [viewerId ?? null];
+  const where = [];
+  let idx = 2;
+
+  if (postId !== null) {
+    where.push(`p.id = $${idx++}`);
+    params.push(postId);
+  }
+  if (mine) {
+    where.push(`p.user_id = $${idx++}`);
+    params.push(viewerId);
+  } else if (userId !== null) {
+    where.push(`p.user_id = $${idx++}`);
+    params.push(userId);
+  }
+
+  const limitIndex = idx;
+  params.push(limit);
+
+  const sql = `
+    SELECT
+      p.id,
+      p.user_id,
+      p.title,
+      p.content,
+      p.image_url,
+      p.created_at,
+      p.updated_at,
+      u.username,
+      COALESCE(pl.likes_count, 0)::int AS likes_count,
+      COALESCE(pc.comments_count, 0)::int AS comments_count,
+      CASE
+        WHEN $1::int IS NULL THEN FALSE
+        ELSE EXISTS (
+          SELECT 1 FROM post_likes myl
+          WHERE myl.post_id = p.id AND myl.user_id = $1
+        )
+      END AS liked_by_me,
+      CASE WHEN $1::int IS NULL THEN FALSE ELSE p.user_id = $1 END AS is_owner
+    FROM posts p
+    JOIN users u ON u.id = p.user_id
+    LEFT JOIN (
+      SELECT post_id, COUNT(*)::int AS likes_count
+      FROM post_likes
+      GROUP BY post_id
+    ) pl ON pl.post_id = p.id
+    LEFT JOIN (
+      SELECT post_id, COUNT(*)::int AS comments_count
+      FROM post_comments
+      GROUP BY post_id
+    ) pc ON pc.post_id = p.id
+    ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+    ORDER BY p.created_at DESC
+    LIMIT $${limitIndex}
+  `;
+
+  const { rows } = await pool.query(sql, params);
+  return rows;
+}
+
+async function loadPostById(postId, viewerId) {
+  const rows = await loadPosts(viewerId, { postId, limit: 1 });
+  return rows[0] || null;
+}
+
+async function loadComments(postId, viewerId) {
+  const { rows } = await pool.query(
+    `
+      SELECT
+        c.id,
+        c.post_id,
+        c.user_id,
+        c.content,
+        c.created_at,
+        c.updated_at,
+        u.username,
+        CASE WHEN $2::int IS NULL THEN FALSE ELSE c.user_id = $2 END AS is_owner
+      FROM post_comments c
+      JOIN users u ON u.id = c.user_id
+      WHERE c.post_id = $1
+      ORDER BY c.created_at ASC
+    `,
+    [postId, viewerId ?? null]
+  );
+  return rows;
+}
+
+async function loadProfile(userId) {
+  const { rows } = await pool.query(
+    `
+      SELECT
+        u.id,
+        u.username,
+        u.created_at,
+        (SELECT COUNT(*)::int FROM posts p WHERE p.user_id = u.id) AS posts_count,
+        (SELECT COUNT(*)::int FROM post_comments c WHERE c.user_id = u.id) AS comments_count,
+        (
+          SELECT COUNT(*)::int
+          FROM post_likes l
+          JOIN posts p2 ON p2.id = l.post_id
+          WHERE p2.user_id = u.id
+        ) AS likes_received
+      FROM users u
+      WHERE u.id = $1
+    `,
+    [userId]
+  );
+  return rows[0] || null;
+}
+
+async function requirePostOwner(postId, userId) {
+  const { rows } = await pool.query("SELECT id, user_id FROM posts WHERE id=$1", [postId]);
+  if (!rows.length) return { ok: false, status: 404, error: "Post not found" };
+  if (rows[0].user_id !== userId) return { ok: false, status: 403, error: "Forbidden" };
+  return { ok: true };
+}
+
+async function requireCommentOwner(commentId, userId) {
+  const { rows } = await pool.query("SELECT id, post_id, user_id FROM post_comments WHERE id=$1", [commentId]);
+  if (!rows.length) return { ok: false, status: 404, error: "Comment not found" };
+  if (rows[0].user_id !== userId) return { ok: false, status: 403, error: "Forbidden" };
+  return { ok: true, postId: rows[0].post_id };
+}
+
+app.get("/api/health", async (_req, res) => {
   try {
     const r = await pool.query("SELECT NOW() as now");
     res.json({ ok: true, dbTime: r.rows[0].now });
@@ -89,13 +229,14 @@ app.get("/api/health", async (req, res) => {
   }
 });
 
-// ---------- AUTH ----------
 app.post("/api/auth/register", async (req, res) => {
   try {
-    const { username, password } = req.body || {};
+    const username = trimText(req.body?.username);
+    const password = String(req.body?.password ?? "");
+
     if (!username || !password) return res.status(400).json({ error: "username & password required" });
-    if (String(username).length < 3) return res.status(400).json({ error: "username must be >= 3 chars" });
-    if (String(password).length < 6) return res.status(400).json({ error: "password must be >= 6 chars" });
+    if (username.length < 3) return res.status(400).json({ error: "username must be >= 3 chars" });
+    if (password.length < 6) return res.status(400).json({ error: "password must be >= 6 chars" });
 
     const exists = await pool.query("SELECT id FROM users WHERE username=$1", [username]);
     if (exists.rowCount) return res.status(409).json({ error: "Username already exists" });
@@ -116,7 +257,9 @@ app.post("/api/auth/register", async (req, res) => {
 
 app.post("/api/auth/login", async (req, res) => {
   try {
-    const { username, password } = req.body || {};
+    const username = trimText(req.body?.username);
+    const password = String(req.body?.password ?? "");
+
     if (!username || !password) return res.status(400).json({ error: "username & password required" });
 
     const r = await pool.query("SELECT id, username, password_hash FROM users WHERE username=$1", [username]);
@@ -137,7 +280,239 @@ app.get("/api/me", auth, (req, res) => {
   res.json({ user: { id: req.user.uid, username: req.user.username } });
 });
 
-// ---------- QUIZ ----------
+app.get("/api/profile/me", auth, async (req, res) => {
+  try {
+    const profile = await loadProfile(req.user.uid);
+    const posts = await loadPosts(req.user.uid, { mine: true, limit: 20 });
+    res.json({ profile, posts });
+  } catch (e) {
+    console.error("PROFILE ME ERROR:", e?.message || e);
+    res.status(500).json({ error: "Failed to load profile" });
+  }
+});
+
+app.get("/api/users/:id/profile", optionalAuth, async (req, res) => {
+  try {
+    const userId = safeInt(req.params.id);
+    if (!userId) return res.status(400).json({ error: "Invalid user id" });
+
+    const profile = await loadProfile(userId);
+    if (!profile) return res.status(404).json({ error: "User not found" });
+
+    const posts = await loadPosts(req.user?.uid ?? null, { userId, limit: 20 });
+    res.json({ profile, posts });
+  } catch (e) {
+    console.error("PROFILE USER ERROR:", e?.message || e);
+    res.status(500).json({ error: "Failed to load profile" });
+  }
+});
+
+app.get("/api/posts", optionalAuth, async (req, res) => {
+  try {
+    const mine = String(req.query.mine || "") === "1";
+    if (mine && !req.user) return res.status(401).json({ error: "Missing token" });
+
+    const userId = safeInt(req.query.user_id);
+    const limit = Math.min(Math.max(safeInt(req.query.limit, 20) || 20, 1), 100);
+    const posts = await loadPosts(req.user?.uid ?? null, { mine, userId, limit });
+    res.json({ posts });
+  } catch (e) {
+    console.error("GET POSTS ERROR:", e?.message || e);
+    res.status(500).json({ error: "Failed to load posts" });
+  }
+});
+
+app.post("/api/posts", auth, async (req, res) => {
+  try {
+    const title = trimText(req.body?.title);
+    const content = trimText(req.body?.content);
+    const image_url = trimText(req.body?.image_url) || null;
+
+    if (!title) return res.status(400).json({ error: "title required" });
+    if (!content) return res.status(400).json({ error: "content required" });
+    if (title.length > 150) return res.status(400).json({ error: "title too long" });
+    if (content.length > 5000) return res.status(400).json({ error: "content too long" });
+    if (image_url && image_url.length > 1000) return res.status(400).json({ error: "image_url too long" });
+
+    const created = await pool.query(
+      `INSERT INTO posts(user_id, title, content, image_url)
+       VALUES($1,$2,$3,$4)
+       RETURNING id`,
+      [req.user.uid, title, content, image_url]
+    );
+
+    const post = await loadPostById(created.rows[0].id, req.user.uid);
+    res.json({ post });
+  } catch (e) {
+    console.error("CREATE POST ERROR:", e?.message || e);
+    res.status(500).json({ error: "Failed to create post" });
+  }
+});
+
+app.put("/api/posts/:id", auth, async (req, res) => {
+  try {
+    const postId = safeInt(req.params.id);
+    if (!postId) return res.status(400).json({ error: "Invalid post id" });
+
+    const ownership = await requirePostOwner(postId, req.user.uid);
+    if (!ownership.ok) return res.status(ownership.status).json({ error: ownership.error });
+
+    const title = trimText(req.body?.title);
+    const content = trimText(req.body?.content);
+    const image_url = trimText(req.body?.image_url) || null;
+
+    if (!title) return res.status(400).json({ error: "title required" });
+    if (!content) return res.status(400).json({ error: "content required" });
+
+    await pool.query(
+      `UPDATE posts
+       SET title=$1, content=$2, image_url=$3, updated_at=NOW()
+       WHERE id=$4`,
+      [title, content, image_url, postId]
+    );
+
+    const post = await loadPostById(postId, req.user.uid);
+    res.json({ post });
+  } catch (e) {
+    console.error("UPDATE POST ERROR:", e?.message || e);
+    res.status(500).json({ error: "Failed to update post" });
+  }
+});
+
+app.delete("/api/posts/:id", auth, async (req, res) => {
+  try {
+    const postId = safeInt(req.params.id);
+    if (!postId) return res.status(400).json({ error: "Invalid post id" });
+
+    const ownership = await requirePostOwner(postId, req.user.uid);
+    if (!ownership.ok) return res.status(ownership.status).json({ error: ownership.error });
+
+    await pool.query("DELETE FROM posts WHERE id=$1", [postId]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("DELETE POST ERROR:", e?.message || e);
+    res.status(500).json({ error: "Failed to delete post" });
+  }
+});
+
+app.get("/api/posts/:id/comments", optionalAuth, async (req, res) => {
+  try {
+    const postId = safeInt(req.params.id);
+    if (!postId) return res.status(400).json({ error: "Invalid post id" });
+    const comments = await loadComments(postId, req.user?.uid ?? null);
+    res.json({ comments });
+  } catch (e) {
+    console.error("GET COMMENTS ERROR:", e?.message || e);
+    res.status(500).json({ error: "Failed to load comments" });
+  }
+});
+
+app.post("/api/posts/:id/comments", auth, async (req, res) => {
+  try {
+    const postId = safeInt(req.params.id);
+    const content = trimText(req.body?.content);
+    if (!postId) return res.status(400).json({ error: "Invalid post id" });
+    if (!content) return res.status(400).json({ error: "content required" });
+    if (content.length > 2000) return res.status(400).json({ error: "content too long" });
+
+    const post = await loadPostById(postId, req.user.uid);
+    if (!post) return res.status(404).json({ error: "Post not found" });
+
+    const created = await pool.query(
+      `INSERT INTO post_comments(post_id, user_id, content)
+       VALUES($1,$2,$3)
+       RETURNING id`,
+      [postId, req.user.uid, content]
+    );
+
+    const comments = await loadComments(postId, req.user.uid);
+    const comment = comments.find((c) => c.id === created.rows[0].id) || null;
+    res.json({ comment, comments_count: comments.length });
+  } catch (e) {
+    console.error("CREATE COMMENT ERROR:", e?.message || e);
+    res.status(500).json({ error: "Failed to create comment" });
+  }
+});
+
+app.put("/api/comments/:id", auth, async (req, res) => {
+  try {
+    const commentId = safeInt(req.params.id);
+    const content = trimText(req.body?.content);
+    if (!commentId) return res.status(400).json({ error: "Invalid comment id" });
+    if (!content) return res.status(400).json({ error: "content required" });
+
+    const ownership = await requireCommentOwner(commentId, req.user.uid);
+    if (!ownership.ok) return res.status(ownership.status).json({ error: ownership.error });
+
+    await pool.query(
+      `UPDATE post_comments
+       SET content=$1, updated_at=NOW()
+       WHERE id=$2`,
+      [content, commentId]
+    );
+
+    const comments = await loadComments(ownership.postId, req.user.uid);
+    const comment = comments.find((c) => c.id === commentId) || null;
+    res.json({ comment });
+  } catch (e) {
+    console.error("UPDATE COMMENT ERROR:", e?.message || e);
+    res.status(500).json({ error: "Failed to update comment" });
+  }
+});
+
+app.delete("/api/comments/:id", auth, async (req, res) => {
+  try {
+    const commentId = safeInt(req.params.id);
+    if (!commentId) return res.status(400).json({ error: "Invalid comment id" });
+
+    const ownership = await requireCommentOwner(commentId, req.user.uid);
+    if (!ownership.ok) return res.status(ownership.status).json({ error: ownership.error });
+
+    await pool.query("DELETE FROM post_comments WHERE id=$1", [commentId]);
+    res.json({ ok: true, post_id: ownership.postId });
+  } catch (e) {
+    console.error("DELETE COMMENT ERROR:", e?.message || e);
+    res.status(500).json({ error: "Failed to delete comment" });
+  }
+});
+
+app.post("/api/posts/:id/like", auth, async (req, res) => {
+  try {
+    const postId = safeInt(req.params.id);
+    if (!postId) return res.status(400).json({ error: "Invalid post id" });
+
+    const post = await loadPostById(postId, req.user.uid);
+    if (!post) return res.status(404).json({ error: "Post not found" });
+
+    await pool.query(
+      `INSERT INTO post_likes(post_id, user_id)
+       VALUES($1,$2)
+       ON CONFLICT (post_id, user_id) DO NOTHING`,
+      [postId, req.user.uid]
+    );
+
+    const fresh = await loadPostById(postId, req.user.uid);
+    res.json({ liked: true, post: fresh });
+  } catch (e) {
+    console.error("LIKE POST ERROR:", e?.message || e);
+    res.status(500).json({ error: "Failed to like post" });
+  }
+});
+
+app.delete("/api/posts/:id/like", auth, async (req, res) => {
+  try {
+    const postId = safeInt(req.params.id);
+    if (!postId) return res.status(400).json({ error: "Invalid post id" });
+
+    await pool.query("DELETE FROM post_likes WHERE post_id=$1 AND user_id=$2", [postId, req.user.uid]);
+    const fresh = await loadPostById(postId, req.user.uid);
+    res.json({ liked: false, post: fresh });
+  } catch (e) {
+    console.error("UNLIKE POST ERROR:", e?.message || e);
+    res.status(500).json({ error: "Failed to unlike post" });
+  }
+});
+
 app.get("/api/quiz/questions", auth, async (req, res) => {
   try {
     const n = Math.min(Math.max(Number(req.query.n || 10), 1), 50);
@@ -165,7 +540,6 @@ app.get("/api/quiz/questions", auth, async (req, res) => {
 app.post("/api/quiz/submit", auth, async (req, res) => {
   try {
     let body = req.body;
-
     if ((typeof body === "string" || !body || Object.keys(body).length === 0) && req.rawBody) {
       try {
         body = JSON.parse(req.rawBody);
@@ -184,14 +558,12 @@ app.post("/api/quiz/submit", auth, async (req, res) => {
 
     let score = 0;
     let total = 0;
-
     for (const a of answers) {
       const qid = Number(a.id);
       const choiceIndex = Number(a.choiceIndex);
-      if (!correct.has(qid)) continue;
-      if (!Number.isFinite(choiceIndex)) continue;
-      total++;
-      if (choiceIndex === correct.get(qid)) score++;
+      if (!correct.has(qid) || !Number.isFinite(choiceIndex)) continue;
+      total += 1;
+      if (choiceIndex === correct.get(qid)) score += 1;
     }
 
     const saved = await pool.query(
@@ -213,7 +585,6 @@ app.post("/api/quiz/submit", auth, async (req, res) => {
   }
 });
 
-// ---------- SCOREBOARD ----------
 app.get("/api/scoreboard", async (req, res) => {
   try {
     const limit = Math.min(Math.max(Number(req.query.limit || 20), 1), 100);
@@ -235,9 +606,10 @@ app.get("/api/scoreboard", async (req, res) => {
   }
 });
 
-// fallback หน้าเว็บเดิม
-app.get("*", (req, res) => {
+app.get("*", (_req, res) => {
   res.sendFile(path.join(__dirname, "index.html"));
 });
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
