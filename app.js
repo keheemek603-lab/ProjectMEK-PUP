@@ -2,14 +2,50 @@
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const $ = (sel, root = document) => root.querySelector(sel);
 
+  function removeDuplicateById(id, keep = 1) {
+    const nodes = document.querySelectorAll(`#${CSS.escape(id)}`);
+    nodes.forEach((node, index) => {
+      if (index >= keep) node.remove();
+    });
+  }
+
+  function cleanupBrokenMarkup() {
+    [
+      "community-profile",
+      "communityProfilePosts",
+      "communityProfileCard",
+      "communityFeedList",
+      "communityMineList",
+      "communityPostForm",
+    ].forEach((id) => removeDuplicateById(id, 1));
+  }
+
+  function resolveApiBase() {
+    const globalBase = window.ITLIB_CONFIG?.API_BASE;
+    const metaBase = document.querySelector('meta[name="itlib-api-base"]')?.content;
+    const base = String(globalBase || metaBase || "").trim();
+    return base.replace(/\/+$/, "");
+  }
+
+  function toApiUrl(path) {
+    if (/^https?:\/\//i.test(path)) return path;
+    const base = resolveApiBase();
+    if (!base) return path;
+    return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+  }
+
+  cleanupBrokenMarkup();
+
   const content = document.getElementById("content");
   if (!content) return;
 
-  const topics = $$(".topic", content);
+  const topics = () => $$(".topic", content);
   const placeholder = $(".placeholder", content);
 
   function hideAllTopics() {
-    topics.forEach((t) => (t.style.display = "none"));
+    topics().forEach((t) => {
+      t.style.display = "none";
+    });
   }
 
   function showTopic(id) {
@@ -85,6 +121,10 @@
     formCancel: document.getElementById("communityCancelEdit"),
   };
 
+  if (!els.feedList && !els.form && !els.mineList && !els.profileCard) {
+    return;
+  }
+
   function escapeHtml(value) {
     return String(value ?? "")
       .replaceAll("&", "&amp;")
@@ -102,29 +142,40 @@
     return window.ITLIB_auth?.getToken?.() || localStorage.getItem("token") || "";
   }
 
-  const API_BASE = "https://project-mek-pup.onrender.com";
+  function resolveApiBase() {
+    const globalBase = window.ITLIB_CONFIG?.API_BASE;
+    const metaBase = document.querySelector('meta[name="itlib-api-base"]')?.content;
+    const base = String(globalBase || metaBase || "").trim();
+    return base.replace(/\/+$/, "");
+  }
 
-function toApiUrl(path) {
-  if (/^https?:\/\//i.test(path)) return path;
-  return `${API_BASE}${path}`;
-}
+  function toApiUrl(path) {
+    if (/^https?:\/\//i.test(path)) return path;
+    const base = resolveApiBase();
+    if (!base) return path;
+    return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+  }
 
-async function api(path, options = {}) {
-  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
-  const token = getToken();
+  async function api(path, options = {}) {
+    const headers = { ...(options.headers || {}) };
+    const token = getToken();
 
-  if (options.auth && token) headers.Authorization = `Bearer ${token}`;
-  if (options.auth && !token) throw new Error("LOGIN_REQUIRED");
+    if (!(options.body instanceof FormData)) {
+      headers["Content-Type"] = headers["Content-Type"] || "application/json";
+    }
 
-  const res = await fetch(toApiUrl(path), {
-    ...options,
-    headers,
-  });
+    if (options.auth && token) headers.Authorization = `Bearer ${token}`;
+    if (options.auth && !token) throw new Error("กรุณา Sign in ก่อนใช้งาน");
 
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
-  return data;
-}
+    const res = await fetch(toApiUrl(path), {
+      ...options,
+      headers,
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+    return data;
+  }
 
   function openLoginModal() {
     if (window.ITLIB_auth?.openLogin) {
@@ -183,7 +234,7 @@ async function api(path, options = {}) {
   }
 
   function fillPostForm(post) {
-    state.editingPostId = post.id;
+    state.editingPostId = Number(post.id);
     if (els.formId) els.formId.value = String(post.id);
     if (els.formTitle) els.formTitle.value = post.title || "";
     if (els.formContent) els.formContent.value = post.content || "";
@@ -301,10 +352,11 @@ async function api(path, options = {}) {
   async function loadComments(postId) {
     try {
       const data = await api(`/api/posts/${postId}/comments`);
-      state.commentCache.set(postId, data.comments || []);
+      const comments = data.comments || [];
+      state.commentCache.set(postId, comments);
       const list = document.getElementById(`comments-list-${postId}`);
       if (list) {
-        list.innerHTML = data.comments?.length ? data.comments.map(renderComment).join("") : '<div class="comment-empty">ยังไม่มีคอมเมนต์</div>';
+        list.innerHTML = comments.length ? comments.map(renderComment).join("") : '<div class="comment-empty">ยังไม่มีคอมเมนต์</div>';
       }
     } catch (err) {
       const list = document.getElementById(`comments-list-${postId}`);
@@ -315,6 +367,7 @@ async function api(path, options = {}) {
   async function toggleComments(postId) {
     const panel = document.getElementById(`comments-panel-${postId}`);
     if (!panel) return;
+
     const isHidden = panel.hasAttribute("hidden");
     if (isHidden) {
       panel.removeAttribute("hidden");
@@ -329,6 +382,7 @@ async function api(path, options = {}) {
   async function submitComment(postId, form) {
     const ok = await requireLogin("กรุณา Sign in ก่อนคอมเมนต์");
     if (!ok) return;
+
     const textarea = form?.querySelector("textarea[name='content']");
     const content = textarea?.value?.trim() || "";
     if (!content) return;
@@ -350,6 +404,7 @@ async function api(path, options = {}) {
   async function toggleLike(postId) {
     const ok = await requireLogin("กรุณา Sign in ก่อนกด Like");
     if (!ok) return;
+
     try {
       await api(`/api/posts/${postId}/like`, { method: "POST", auth: true });
       await Promise.all([loadFeed(), loadMineIfVisible(), refreshProfileIfVisible()]);
@@ -362,6 +417,7 @@ async function api(path, options = {}) {
     const ok = await requireLogin("กรุณา Sign in ก่อนลบคอมเมนต์");
     if (!ok) return;
     if (!confirm("ลบคอมเมนต์นี้ใช่ไหม?")) return;
+
     try {
       const data = await api(`/api/comments/${commentId}`, { method: "DELETE", auth: true });
       if (data.post_id) await loadComments(Number(data.post_id));
@@ -375,9 +431,10 @@ async function api(path, options = {}) {
     const ok = await requireLogin("กรุณา Sign in ก่อนลบโพสต์");
     if (!ok) return;
     if (!confirm("ลบโพสต์นี้ใช่ไหม?")) return;
+
     try {
       await api(`/api/posts/${postId}`, { method: "DELETE", auth: true });
-      if (state.editingPostId === postId) resetPostForm();
+      if (state.editingPostId === Number(postId)) resetPostForm();
       await Promise.all([loadFeed(), loadMineIfVisible(), refreshProfileIfVisible()]);
       setFormStatus("ลบโพสต์แล้ว", "ok");
     } catch (err) {
@@ -388,6 +445,7 @@ async function api(path, options = {}) {
   async function beginEdit(postId) {
     const ok = await requireLogin("กรุณา Sign in ก่อนแก้ไขโพสต์");
     if (!ok) return;
+
     try {
       const mine = await api("/api/posts?mine=1&limit=100", { auth: true });
       const post = (mine.posts || []).find((p) => Number(p.id) === Number(postId));
@@ -455,7 +513,10 @@ async function api(path, options = {}) {
       const profileData = username === "me"
         ? await api("/api/profile/me", { auth: true })
         : await api(`/api/profile/${encodeURIComponent(username)}`);
+
       const profile = profileData.profile;
+      if (!profile) throw new Error("Profile not found");
+
       state.currentProfile = profile.username;
 
       els.profileCard.innerHTML = `
@@ -497,7 +558,8 @@ async function api(path, options = {}) {
   async function refreshProfileIfVisible() {
     const profile = document.getElementById("community-profile");
     if (profile && profile.style.display !== "none" && state.currentProfile) {
-      await loadProfile(state.currentProfile === state.me?.username ? "me" : state.currentProfile);
+      const currentUser = window.ITLIB_auth?.getUser?.() || state.me;
+      await loadProfile(state.currentProfile === currentUser?.username ? "me" : state.currentProfile);
     }
   }
 
@@ -561,7 +623,6 @@ async function api(path, options = {}) {
     if (deleteBtn) {
       e.preventDefault();
       await deletePost(Number(deleteBtn.getAttribute("data-delete-post")));
-      return;
     }
   });
 
@@ -590,5 +651,6 @@ async function api(path, options = {}) {
     loadFeed,
     loadMine,
     loadMyProfile,
+    loadProfile,
   };
 })();

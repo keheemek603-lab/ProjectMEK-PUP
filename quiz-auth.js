@@ -1,6 +1,5 @@
 (() => {
   const $ = (sel, root = document) => root.querySelector(sel);
-  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
   const API = {
     me: "/api/me",
@@ -19,26 +18,40 @@
     submitting: false,
   };
 
+  function resolveApiBase() {
+    const globalBase = window.ITLIB_CONFIG?.API_BASE;
+    const metaBase = document.querySelector('meta[name="itlib-api-base"]')?.content;
+    const base = String(globalBase || metaBase || "").trim();
+    return base.replace(/\/+$/, "");
+  }
+
+  function toApiUrl(path) {
+    if (/^https?:\/\//i.test(path)) return path;
+    const base = resolveApiBase();
+    if (!base) return path;
+    return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+  }
+
   function authHeader() {
     return state.token ? { Authorization: `Bearer ${state.token}` } : {};
   }
 
-  const API_BASE = "https://project-mek-pup.onrender.com";
+  async function api(path, opts = {}) {
+    const headers = { ...(opts.headers || {}) };
 
-function toApiUrl(path) {
-  if (/^https?:\/\//i.test(path)) return path;
-  return `${API_BASE}${path}`;
-}
+    if (!(opts.body instanceof FormData)) {
+      headers["Content-Type"] = headers["Content-Type"] || "application/json";
+    }
 
-async function api(path, opts = {}) {
-  const res = await fetch(toApiUrl(path), {
-    headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
-    ...opts,
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
-  return data;
-}
+    const res = await fetch(toApiUrl(path), {
+      ...opts,
+      headers,
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+    return data;
+  }
 
   function ensureTopAuthUI() {
     let wrap = document.getElementById("topbarAuth");
@@ -83,15 +96,18 @@ async function api(path, opts = {}) {
 
   function setLoginUI(isLoggedIn) {
     const { statusEl, loginBtn, logoutBtn } = ensureTopAuthUI();
-
     if (isLoggedIn) {
       statusEl.textContent = `สวัสดี, ${state.user?.username || ""}`;
-      loginBtn.style.display = "none";
+      loginBtn.style.display = "inline-flex";
+      loginBtn.hidden = true;
       logoutBtn.style.display = "inline-flex";
+      logoutBtn.hidden = false;
     } else {
       statusEl.textContent = "Guest";
       loginBtn.style.display = "inline-flex";
-      logoutBtn.style.display = "none";
+      loginBtn.hidden = false;
+      logoutBtn.style.display = "inline-flex";
+      logoutBtn.hidden = true;
     }
   }
 
@@ -110,9 +126,12 @@ async function api(path, opts = {}) {
   function doLogout() {
     state.token = "";
     state.user = null;
+    state.questions = [];
     localStorage.removeItem("token");
     setLoginUI(false);
     notifyAuthChanged();
+    renderQuizStage();
+    updatePlayerLabel();
   }
 
   async function ensureLogin() {
@@ -127,6 +146,7 @@ async function api(path, opts = {}) {
       state.user = me.user;
       setLoginUI(true);
       notifyAuthChanged();
+      updatePlayerLabel();
       return true;
     } catch {
       doLogout();
@@ -154,6 +174,11 @@ async function api(path, opts = {}) {
       .qa-msg{margin-top:10px;color:#cbd5e1}
       .qa-msg.bad{color:#fb7185}
       .qa-msg.good{color:#34d399}
+      .quiz-question{border:1px solid var(--line2,#e6f6e6);border-radius:12px;padding:12px;margin:12px 0;background:#fff}
+      .quiz-choice{display:flex;gap:10px;align-items:flex-start;padding:8px 0}
+      .quiz-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+      .score-row{display:flex;gap:10px;padding:8px 0;border-bottom:1px dashed rgba(0,0,0,.08)}
+      .quiz-result{margin:12px 0;padding:12px;border-radius:12px;background:#f7fff7;border:1px solid #cfe9cf;font-weight:800}
     `;
     document.head.appendChild(style);
 
@@ -248,11 +273,11 @@ async function api(path, opts = {}) {
 
         setLoginUI(true);
         notifyAuthChanged();
+        updatePlayerLabel();
         setMsg(state.mode === "login" ? "Login สำเร็จ" : "สมัครสำเร็จและเข้าสู่ระบบแล้ว", "good");
+        renderQuizStage();
 
-        setTimeout(() => {
-          close();
-        }, 250);
+        setTimeout(close, 250);
       } catch (e) {
         setMsg(e.message || "เกิดข้อผิดพลาด", "bad");
       }
@@ -262,13 +287,56 @@ async function api(path, opts = {}) {
     return overlay;
   }
 
-  function showQuizTopic() {
-    if (typeof window.ITLIB_showTopic === "function") {
-      window.ITLIB_showTopic("quiz");
-      return;
-    }
-    const quiz = document.getElementById("quiz");
-    if (quiz) quiz.style.display = "block";
+  function ensureQuizTopic() {
+    const content = document.getElementById("content") || document.querySelector("main");
+    if (!content) return null;
+
+    let quiz = document.getElementById("quiz");
+    if (quiz) return quiz;
+
+    quiz = document.createElement("article");
+    quiz.id = "quiz";
+    quiz.className = "topic card";
+    quiz.innerHTML = `
+      <div class="community-header">
+        <div>
+          <h2>IT Quiz Arena</h2>
+          <p class="community-subtitle">ตอบคำถาม IT แล้วบันทึกคะแนนขึ้น Leaderboard</p>
+        </div>
+      </div>
+
+      <div class="quiz-panel">
+        <div class="community-form-row">
+          <label class="community-label">ชื่อผู้เล่น</label>
+          <div id="playerName">กำลังโหลดชื่อ...</div>
+        </div>
+
+        <div class="community-form-row">
+          <label class="community-label" for="quizMode">โหมด</label>
+          <select id="quizMode" class="community-input">
+            <option value="10">10 ข้อ (เร็ว)</option>
+            <option value="20">20 ข้อ (มาตรฐาน)</option>
+            <option value="30">30 ข้อ (โหด)</option>
+          </select>
+        </div>
+
+        <div class="quiz-actions">
+          <button id="btnStartQuiz" type="button" class="quiz-btn">เริ่มเกม</button>
+          <button id="btnSubmitQuiz" type="button" class="quiz-btn ghost">ส่งคำตอบ</button>
+          <button id="btnResetQuiz" type="button" class="quiz-btn ghost">รีเซ็ต</button>
+        </div>
+
+        <div id="quizResult"></div>
+        <div id="quizStage" class="quiz-stage"><div class="muted">กด “เริ่มเกม” เพื่อโหลดคำถามจากเซิร์ฟเวอร์</div></div>
+
+        <h3 style="margin-top:16px">Leaderboard (Top 10)</h3>
+        <div id="lbStatus" class="muted">กำลังโหลด...</div>
+        <div id="lbBody"></div>
+      </div>
+    `;
+
+    content.prepend(quiz);
+    return quiz;
   }
 
   function els() {
@@ -277,8 +345,10 @@ async function api(path, opts = {}) {
       playerName: document.getElementById("playerName"),
       quizMode: document.getElementById("quizMode"),
       btnStart: document.getElementById("btnStartQuiz"),
+      btnSubmit: document.getElementById("btnSubmitQuiz"),
       btnReset: document.getElementById("btnResetQuiz"),
       quizStage: document.getElementById("quizStage"),
+      quizResult: document.getElementById("quizResult"),
       lbStatus: document.getElementById("lbStatus"),
       lbBody: document.getElementById("lbBody"),
     };
@@ -288,24 +358,81 @@ async function api(path, opts = {}) {
     if (el) el.textContent = txt ?? "";
   }
 
+  function updatePlayerLabel() {
+    const { playerName } = els();
+    if (!playerName) return;
+    playerName.textContent = state.user?.username || "Guest";
+  }
+
   function lockQuizUI() {
-    const { btnStart, playerName, quizMode } = els();
+    const { btnStart, btnSubmit, playerName, quizMode } = els();
     if (btnStart) btnStart.disabled = true;
-    if (playerName) playerName.disabled = true;
+    if (btnSubmit) btnSubmit.disabled = true;
+    if (playerName) playerName.setAttribute("aria-disabled", "true");
     if (quizMode) quizMode.disabled = true;
   }
 
   function unlockQuizUI() {
-    const { btnStart, playerName, quizMode } = els();
+    const { btnStart, btnSubmit, quizMode } = els();
     if (btnStart) btnStart.disabled = false;
-    if (playerName) playerName.disabled = false;
+    if (btnSubmit) btnSubmit.disabled = state.questions.length === 0;
     if (quizMode) quizMode.disabled = false;
+  }
+
+  function renderQuizStage() {
+    const { quizStage, quizResult } = els();
+    if (!quizStage) return;
+
+    if (quizResult) quizResult.innerHTML = "";
+
+    if (!state.questions.length) {
+      quizStage.innerHTML = `<div class="muted">กด “เริ่มเกม” เพื่อโหลดคำถามจากเซิร์ฟเวอร์</div>`;
+      const { btnSubmit } = els();
+      if (btnSubmit) btnSubmit.disabled = true;
+      return;
+    }
+
+    quizStage.innerHTML = state.questions
+      .map(
+        (q, index) => `
+          <fieldset class="quiz-question" data-question-id="${q.id}">
+            <legend><strong>ข้อ ${index + 1}:</strong> ${String(q.question)}</legend>
+            ${q.choices
+              .map(
+                (choice, choiceIndex) => `
+                  <label class="quiz-choice">
+                    <input type="radio" name="question-${q.id}" value="${choiceIndex}" />
+                    <span>${String(choice)}</span>
+                  </label>
+                `
+              )
+              .join("")}
+          </fieldset>
+        `
+      )
+      .join("");
+
+    const { btnSubmit } = els();
+    if (btnSubmit) btnSubmit.disabled = false;
+  }
+
+  function collectAnswers() {
+    const { quizStage } = els();
+    if (!quizStage) return [];
+
+    return state.questions.map((q) => {
+      const checked = quizStage.querySelector(`input[name="question-${q.id}"]:checked`);
+      return {
+        id: q.id,
+        choiceIndex: checked ? Number(checked.value) : null,
+      };
+    }).filter((x) => Number.isInteger(x.choiceIndex));
   }
 
   async function loadScoreboard() {
     const { lbBody, lbStatus } = els();
     try {
-      setText(lbStatus, "กำลังโหลด scoreboard...");
+      setText(lbStatus, "กำลังโหลด leaderboard...");
       const data = await api(API.scoreboard(10));
       const rows = data.rows || [];
 
@@ -317,16 +444,96 @@ async function api(path, opts = {}) {
           .map(
             (r, i) => `
               <div class="score-row">
-                <strong>#${i + 1}</strong> ${String(r.username)} — ${Number(r.score)}/${Number(r.total)}
+                <strong>#${i + 1}</strong>
+                <span>${String(r.username)}</span>
+                <span>${Number(r.score)}/${Number(r.total)}</span>
+                <span>${new Date(r.created_at).toLocaleString("th-TH")}</span>
               </div>
             `
           )
           .join("");
       }
       setText(lbStatus, "พร้อมใช้งาน");
-    } catch {
-      setText(lbStatus, "โหลด scoreboard ไม่สำเร็จ");
+    } catch (e) {
+      setText(lbStatus, `โหลด leaderboard ไม่สำเร็จ: ${e.message || "unknown error"}`);
     }
+  }
+
+  async function loadQuestions() {
+    const ok = await ensureLogin();
+    if (!ok) {
+      lockQuizUI();
+      const modal = ensureModal();
+      modal.__api.setMode("login");
+      modal.__api.open();
+      return;
+    }
+
+    const { quizMode, quizStage, quizResult } = els();
+    const count = Number(quizMode?.value || 10);
+
+    if (quizResult) quizResult.innerHTML = "";
+    if (quizStage) quizStage.innerHTML = `<div class="muted">กำลังโหลดคำถาม...</div>`;
+
+    try {
+      const data = await api(API.questions(count), { headers: authHeader() });
+      state.questions = data.questions || [];
+      renderQuizStage();
+      unlockQuizUI();
+    } catch (e) {
+      if (quizStage) {
+        quizStage.innerHTML = `<div class="muted">โหลดคำถามไม่สำเร็จ: ${e.message}</div>`;
+      }
+    }
+  }
+
+  async function submitQuiz() {
+    if (state.submitting) return;
+
+    const ok = await ensureLogin();
+    if (!ok) {
+      const modal = ensureModal();
+      modal.__api.setMode("login");
+      modal.__api.open();
+      return;
+    }
+
+    const answers = collectAnswers();
+    const { quizResult } = els();
+
+    if (!answers.length) {
+      if (quizResult) quizResult.innerHTML = `<div class="quiz-result">กรุณาเลือกคำตอบอย่างน้อย 1 ข้อก่อนส่ง</div>`;
+      return;
+    }
+
+    state.submitting = true;
+    try {
+      const data = await api(API.submit, {
+        method: "POST",
+        headers: authHeader(),
+        body: JSON.stringify({ answers }),
+      });
+
+      const result = data.result;
+      if (quizResult) {
+        quizResult.innerHTML = `
+          <div class="quiz-result">
+            ได้คะแนน ${Number(result.score)}/${Number(result.total)} (${Number(result.percent)}%)
+          </div>
+        `;
+      }
+
+      await loadScoreboard();
+    } catch (e) {
+      if (quizResult) quizResult.innerHTML = `<div class="quiz-result">ส่งคำตอบไม่สำเร็จ: ${e.message}</div>`;
+    } finally {
+      state.submitting = false;
+    }
+  }
+
+  function resetQuiz() {
+    state.questions = [];
+    renderQuizStage();
   }
 
   window.ITLIB_auth = {
@@ -351,6 +558,10 @@ async function api(path, opts = {}) {
     const quizOpen = e.target.closest('[data-menu="quiz"], [data-target="quiz"]');
     if (!quizOpen) return;
 
+    if (typeof window.ITLIB_showTopic === "function") {
+      window.ITLIB_showTopic("quiz");
+    }
+
     const ok = await ensureLogin();
     if (!ok) {
       e.preventDefault();
@@ -364,6 +575,7 @@ async function api(path, opts = {}) {
   window.addEventListener("DOMContentLoaded", async () => {
     ensureTopAuthUI();
     ensureModal();
+    ensureQuizTopic();
 
     const { loginBtn, logoutBtn } = ensureTopAuthUI();
 
@@ -386,46 +598,37 @@ async function api(path, opts = {}) {
     }
 
     const loggedIn = await ensureLogin();
+    updatePlayerLabel();
     if (!loggedIn) lockQuizUI();
     else unlockQuizUI();
 
-    const { btnStart, btnReset } = els();
+    const { btnStart, btnSubmit, btnReset } = els();
 
     if (btnStart && !btnStart.__bound) {
       btnStart.addEventListener("click", async (e) => {
         e.preventDefault();
-        const ok = await ensureLogin();
-        if (!ok) {
-          const modal = ensureModal();
-          modal.__api.setMode("login");
-          modal.__api.open();
-          return;
-        }
-
-        const { quizMode, quizStage } = els();
-        const count = Number(quizMode?.value || 5);
-        const data = await api(API.questions(count), { headers: authHeader() });
-
-        state.questions = data.questions || [];
-        if (quizStage) {
-          quizStage.innerHTML = `<div class="muted">โหลดข้อสอบแล้ว ${state.questions.length} ข้อ</div>`;
-        }
+        await loadQuestions();
       });
       btnStart.__bound = true;
+    }
+
+    if (btnSubmit && !btnSubmit.__bound) {
+      btnSubmit.addEventListener("click", async (e) => {
+        e.preventDefault();
+        await submitQuiz();
+      });
+      btnSubmit.__bound = true;
     }
 
     if (btnReset && !btnReset.__bound) {
       btnReset.addEventListener("click", (e) => {
         e.preventDefault();
-        const { quizStage } = els();
-        state.questions = [];
-        if (quizStage) {
-          quizStage.innerHTML = `<div class="muted">รีเซ็ตแล้ว</div>`;
-        }
+        resetQuiz();
       });
       btnReset.__bound = true;
     }
 
+    renderQuizStage();
     await loadScoreboard();
   });
 })();
