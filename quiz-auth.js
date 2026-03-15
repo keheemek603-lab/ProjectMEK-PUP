@@ -1,5 +1,3 @@
-// quiz-auth.js — AUTH UI + QUIZ + TOPBAR LOGIN/LOGOUT
-
 (() => {
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -38,11 +36,7 @@
   function ensureTopAuthUI() {
     let wrap = document.getElementById("topbarAuth");
     if (!wrap) {
-      const topbar =
-        document.querySelector(".topbar") ||
-        document.querySelector("header") ||
-        document.body;
-
+      const topbar = document.querySelector(".topbar") || document.querySelector("header") || document.body;
       wrap = document.createElement("div");
       wrap.id = "topbarAuth";
       wrap.className = "right";
@@ -139,46 +133,18 @@
 
     const style = document.createElement("style");
     style.textContent = `
-      .qa-overlay{
-        position:fixed; inset:0; display:none; align-items:center; justify-content:center;
-        background:rgba(0,0,0,.55); z-index:99999;
-      }
-      .qa-modal{
-        width:min(520px,92vw);
-        background:#0f172a; color:#e5e7eb;
-        border:1px solid rgba(255,255,255,.15);
-        border-radius:16px; padding:16px;
-        box-shadow:0 20px 60px rgba(0,0,0,.45);
-      }
-      .qa-row{display:flex; gap:10px; align-items:center; justify-content:space-between}
-      .qa-tabs{display:flex; gap:8px; margin:10px 0}
-      .qa-tab{
-        padding:8px 10px; border-radius:12px; cursor:pointer;
-        border:1px solid rgba(255,255,255,.18);
-        background:transparent; color:#cbd5e1;
-      }
-      .qa-tab.active{
-        background:rgba(34,211,238,.15);
-        border-color:rgba(34,211,238,.45);
-        color:#e2e8f0;
-      }
-      .qa-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px}
-      .qa-label{font-size:12px; color:#cbd5e1; margin-bottom:6px}
-      .qa-input{
-        width:100%; padding:10px; border-radius:12px;
-        border:1px solid rgba(255,255,255,.18);
-        background:rgba(0,0,0,.25); color:#e5e7eb; outline:none;
-      }
-      .qa-btn{
-        padding:10px 12px; border-radius:12px; cursor:pointer; font-weight:700;
-        border:1px solid rgba(255,255,255,.18);
-        background:rgba(255,255,255,.08); color:#e5e7eb;
-      }
-      .qa-btn.primary{
-        border-color:rgba(34,211,238,.55);
-        background:rgba(34,211,238,.18);
-      }
-      .qa-msg{margin-top:10px; color:#cbd5e1}
+      .qa-overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.55);z-index:99999}
+      .qa-modal{width:min(520px,92vw);background:#0f172a;color:#e5e7eb;border:1px solid rgba(255,255,255,.15);border-radius:16px;padding:16px;box-shadow:0 20px 60px rgba(0,0,0,.45)}
+      .qa-row{display:flex;gap:10px;align-items:center;justify-content:space-between}
+      .qa-tabs{display:flex;gap:8px;margin:10px 0}
+      .qa-tab{padding:8px 10px;border-radius:12px;cursor:pointer;border:1px solid rgba(255,255,255,.18);background:transparent;color:#cbd5e1}
+      .qa-tab.active{background:rgba(34,211,238,.15);border-color:rgba(34,211,238,.45);color:#e2e8f0}
+      .qa-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+      .qa-label{font-size:12px;color:#cbd5e1;margin-bottom:6px}
+      .qa-input{width:100%;padding:10px;border-radius:12px;border:1px solid rgba(255,255,255,.18);background:rgba(0,0,0,.25);color:#e5e7eb;outline:none}
+      .qa-btn{padding:10px 12px;border-radius:12px;cursor:pointer;font-weight:700;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.08);color:#e5e7eb}
+      .qa-btn.primary{border-color:rgba(34,211,238,.55);background:rgba(34,211,238,.18)}
+      .qa-msg{margin-top:10px;color:#cbd5e1}
       .qa-msg.bad{color:#fb7185}
       .qa-msg.good{color:#34d399}
     `;
@@ -238,6 +204,7 @@
       overlay.style.display = "flex";
       setTimeout(() => $("#qaUsername")?.focus(), 0);
     };
+
     const close = () => {
       overlay.style.display = "none";
     };
@@ -326,39 +293,6 @@
     if (btnStart) btnStart.disabled = false;
     if (playerName) playerName.disabled = false;
     if (quizMode) quizMode.disabled = false;
-  }
-
-  async function openQuizPage() {
-    showQuizTopic();
-    const ok = await ensureLogin();
-    if (!ok) {
-      lockQuizUI();
-      return false;
-    }
-    unlockQuizUI();
-    return true;
-  }
-
-  async function startQuiz() {
-    const { quizMode, quizStage } = els();
-    const ok = await ensureLogin();
-    if (!ok) {
-      ensureModal().__api.setMode("login");
-      ensureModal().__api.open();
-      return;
-    }
-
-    const count = Number(quizMode?.value || 5);
-    const data = await api(API.questions(count), {
-      headers: authHeader(),
-    });
-
-    state.questions = data.questions || [];
-    if (quizStage) {
-      quizStage.innerHTML = `
-        <div class="muted">โหลดข้อสอบแล้ว ${state.questions.length} ข้อ</div>
-      `;
-    }
   }
 
   async function loadScoreboard() {
@@ -453,7 +387,22 @@
     if (btnStart && !btnStart.__bound) {
       btnStart.addEventListener("click", async (e) => {
         e.preventDefault();
-        await startQuiz();
+        const ok = await ensureLogin();
+        if (!ok) {
+          const modal = ensureModal();
+          modal.__api.setMode("login");
+          modal.__api.open();
+          return;
+        }
+
+        const { quizMode, quizStage } = els();
+        const count = Number(quizMode?.value || 5);
+        const data = await api(API.questions(count), { headers: authHeader() });
+
+        state.questions = data.questions || [];
+        if (quizStage) {
+          quizStage.innerHTML = `<div class="muted">โหลดข้อสอบแล้ว ${state.questions.length} ข้อ</div>`;
+        }
       });
       btnStart.__bound = true;
     }

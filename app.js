@@ -42,9 +42,11 @@
 
     const menu = a.getAttribute("data-menu");
     if (!menu || menu === "quiz") return;
+
     const box = a.closest(".box");
     const firstSub = box?.querySelector(".flyout a.sub[data-target]");
     const firstId = firstSub?.getAttribute("data-target");
+
     if (firstId) {
       e.preventDefault();
       showTopic(firstId);
@@ -57,14 +59,11 @@
 
 (() => {
   const $ = (sel, root = document) => root.querySelector(sel);
-  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const showTopic = window.ITLIB_showTopic;
   if (!showTopic) return;
 
   const state = {
     me: null,
-    feedLoaded: false,
-    mineLoaded: false,
     currentProfile: null,
     commentsOpen: new Set(),
     commentCache: new Map(),
@@ -106,6 +105,7 @@
   async function api(path, options = {}) {
     const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
     const token = getToken();
+
     if (options.auth && token) headers.Authorization = `Bearer ${token}`;
     if (options.auth && !token) throw new Error("LOGIN_REQUIRED");
 
@@ -191,7 +191,7 @@
           <span>${escapeHtml(formatDate(comment.created_at))}</span>
         </div>
         <div class="comment-body">${nl2br(comment.content)}</div>
-        ${comment.can_delete ? `<div class="comment-actions"><button type="button" class="community-btn small ghost" data-delete-comment="${comment.id}" data-post-id="${comment.post_id}">ลบคอมเมนต์</button></div>` : ""}
+        ${comment.can_delete ? `<div class="comment-actions"><button type="button" class="community-btn small ghost" data-delete-comment="${comment.id}">ลบคอมเมนต์</button></div>` : ""}
       </div>
     `;
   }
@@ -206,7 +206,7 @@
         <form class="comment-form" data-comment-form="${postId}">
           <textarea class="comment-input" name="content" rows="3" placeholder="เขียนคอมเมนต์..."></textarea>
           <div class="comment-form-actions">
-            <button type="submit" class="community-btn small" data-require-auth="true">ส่งคอมเมนต์</button>
+            <button type="submit" class="community-btn small">ส่งคอมเมนต์</button>
           </div>
         </form>
       </section>
@@ -247,7 +247,7 @@
           <span>💬 ${Number(post.comments_count || 0)} Comment</span>
         </div>
         <div class="post-actions">
-          <button type="button" class="community-btn small ${post.liked_by_me ? "" : "ghost"}" data-like-post="${post.id}" data-require-auth="true">${post.liked_by_me ? "Unlike" : "Like"}</button>
+          <button type="button" class="community-btn small ${post.liked_by_me ? "" : "ghost"}" data-like-post="${post.id}">${post.liked_by_me ? "Unlike" : "Like"}</button>
           <button type="button" class="community-btn small ghost" data-toggle-comments="${post.id}">Comment</button>
           <button type="button" class="community-btn small ghost" data-view-profile="${escapeHtml(post.author_username)}">Profile</button>
         </div>
@@ -260,9 +260,8 @@
     if (!els.feedList) return;
     els.feedList.innerHTML = '<div class="muted">กำลังโหลดโพสต์...</div>';
     try {
-      const data = await api("/api/posts?limit=30", { auth: false });
+      const data = await api("/api/posts?limit=30");
       const posts = data.posts || [];
-      state.feedLoaded = true;
       els.feedList.innerHTML = posts.length
         ? posts.map(renderPostCard).join("")
         : '<div class="community-empty"><div class="community-empty-icon">📰</div><h3>ยังไม่มีโพสต์</h3><p class="muted">เป็นคนแรกที่แชร์ความรู้ใน Community ได้เลย</p></div>';
@@ -280,7 +279,6 @@
     try {
       const data = await api("/api/posts?mine=1&limit=50", { auth: true });
       const posts = data.posts || [];
-      state.mineLoaded = true;
       els.mineList.innerHTML = posts.length
         ? posts.map(renderPostCard).join("")
         : '<div class="community-empty"><div class="community-empty-icon">📝</div><h3>ยังไม่มีโพสต์ของคุณ</h3><p class="muted">กดปุ่มสร้างโพสต์ใหม่เพื่อเริ่มต้น</p></div>';
@@ -291,7 +289,7 @@
 
   async function loadComments(postId) {
     try {
-      const data = await api(`/api/posts/${postId}/comments`, { auth: false });
+      const data = await api(`/api/posts/${postId}/comments`);
       state.commentCache.set(postId, data.comments || []);
       const list = document.getElementById(`comments-list-${postId}`);
       if (list) {
@@ -423,6 +421,7 @@
         });
         setFormStatus("โพสต์ข้อความสำเร็จ", "ok");
       }
+
       resetPostForm();
       showTopic("community-feed");
       await Promise.all([loadFeed(), loadMineIfVisible(), refreshProfileIfVisible()]);
@@ -444,7 +443,7 @@
     try {
       const profileData = username === "me"
         ? await api("/api/profile/me", { auth: true })
-        : await api(`/api/profile/${encodeURIComponent(username)}`, { auth: false });
+        : await api(`/api/profile/${encodeURIComponent(username)}`);
       const profile = profileData.profile;
       state.currentProfile = profile.username;
 
@@ -463,11 +462,11 @@
         </div>
       `;
 
-      const postsData = await api(`/api/posts?username=${encodeURIComponent(profile.username)}&limit=50`, { auth: false });
-      const posts = postsData.posts || [];
+      const posts = profileData.posts || [];
       els.profilePosts.innerHTML = posts.length
         ? posts.map(renderPostCard).join("")
         : '<div class="community-empty"><div class="community-empty-icon">👤</div><h3>ผู้ใช้นี้ยังไม่มีโพสต์</h3></div>';
+
       showTopic("community-profile");
     } catch (err) {
       els.profileCard.innerHTML = `<div class="muted">โหลดโปรไฟล์ไม่สำเร็จ: ${escapeHtml(err.message)}</div>`;
@@ -481,9 +480,7 @@
 
   async function loadMineIfVisible() {
     const mine = document.getElementById("community-mine");
-    if (mine && mine.style.display !== "none") {
-      await loadMine();
-    }
+    if (mine && mine.style.display !== "none") await loadMine();
   }
 
   async function refreshProfileIfVisible() {
@@ -498,10 +495,12 @@
     if (targetBtn) {
       const targetId = targetBtn.getAttribute("data-target");
       const mustLogin = targetBtn.getAttribute("data-require-auth") === "true";
+
       if (mustLogin) {
         const ok = await requireLogin("กรุณา Sign in ก่อนเข้าใช้งานส่วนนี้");
         if (!ok) return;
       }
+
       if (targetId) {
         e.preventDefault();
         showTopic(targetId);
@@ -560,7 +559,6 @@
     if (commentForm) {
       e.preventDefault();
       await submitComment(Number(commentForm.getAttribute("data-comment-form")), commentForm);
-      return;
     }
   });
 
