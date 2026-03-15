@@ -744,6 +744,10 @@ app.get("/api/scoreboard", async (req, res) => {
   }
 });
 
+app.get("/api/version", (_req, res) => {
+  res.json({ version: "community-fix-2026-03-15-01" });
+});
+
 app.get("*", (_req, res) => {
   res.sendFile(path.join(__dirname, "index.html"));
 });
@@ -752,6 +756,3 @@ app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 
-app.get("/api/version", (_req, res) => {
-  res.json({ version: "community-fix-2026-03-15-01" });
-});
