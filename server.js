@@ -63,28 +63,54 @@ function parseToken(req) {
   return header.startsWith("Bearer ") ? header.slice(7) : header;
 }
 
-function auth(req, res, next) {
+async function getUserById(id) {
+  const r = await pool.query(
+    "SELECT id, username FROM users WHERE id = $1",
+    [id]
+  );
+  return r.rows[0] || null;
+}
+
+async function auth(req, res, next) {
   const token = parseToken(req);
   if (!token) return res.status(401).json({ error: "Missing token" });
+
   try {
-    req.user = jwt.verify(token, JWT_SECRET);
+    const payload = jwt.verify(token, JWT_SECRET);
+    const dbUser = await getUserById(payload.uid);
+
+    if (!dbUser) {
+      return res.status(401).json({ error: "User not found" });
+    }
+
+    req.user = { uid: dbUser.id, username: dbUser.username };
     next();
   } catch {
     res.status(401).json({ error: "Invalid token" });
   }
 }
 
-function optionalAuth(req, _res, next) {
+async function optionalAuth(req, _res, next) {
   const token = parseToken(req);
   if (!token) {
     req.user = null;
     return next();
   }
+
   try {
-    req.user = jwt.verify(token, JWT_SECRET);
+    const payload = jwt.verify(token, JWT_SECRET);
+    const dbUser = await getUserById(payload.uid);
+
+    if (!dbUser) {
+      req.user = null;
+      return next();
+    }
+
+    req.user = { uid: dbUser.id, username: dbUser.username };
   } catch {
     req.user = null;
   }
+
   next();
 }
 
@@ -323,8 +349,10 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-app.get("/api/me", auth, (req, res) => {
-  res.json({ user: { id: req.user.uid, username: req.user.username } });
+app.get("/api/me", auth, async (req, res) => {
+  const user = await getUserById(req.user.uid);
+  if (!user) return res.status(401).json({ error: "User not found" });
+  res.json({ user });
 });
 
 app.get("/api/profile/me", auth, async (req, res) => {
@@ -379,6 +407,9 @@ app.get("/api/posts", optionalAuth, async (req, res) => {
 
 app.post("/api/posts", auth, async (req, res) => {
   try {
+    const dbUser = await getUserById(req.user.uid);
+    if (!dbUser) return res.status(401).json({ error: "User not found" });
+
     const title = trimText(req.body?.title, 150);
     const content = trimText(req.body?.content, 5000);
     const image_url = normalizeImageUrl(req.body?.image_url);
@@ -392,10 +423,10 @@ app.post("/api/posts", auth, async (req, res) => {
         VALUES($1,$2,$3,$4)
         RETURNING id
       `,
-      [req.user.uid, title, content, image_url]
+      [dbUser.id, title, content, image_url]
     );
 
-    const post = await loadPostById(inserted.rows[0].id, req.user.uid);
+    const post = await loadPostById(inserted.rows[0].id, dbUser.id);
     res.status(201).json({ post });
   } catch (e) {
     console.error("CREATE POST ERROR:", e?.message || e);
