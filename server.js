@@ -202,9 +202,76 @@ async function loadPosts(
   return rows;
 }
 
-async function loadPostById(postId, viewerId) {
-  const rows = await loadPosts(viewerId, { postId, limit: 1 });
-  return rows[0] || null;
+async function loadPosts(
+  viewerId,
+  { postId = null, userId = null, username = null, mine = false, limit = 30 } = {}
+) {
+  const params = [viewerId ?? null];
+  const where = [];
+  let idx = 2;
+
+  if (postId !== null) {
+    where.push(`p.id = $${idx++}`);
+    params.push(postId);
+  }
+
+  if (mine) {
+    where.push(`p.user_id = $${idx++}`);
+    params.push(viewerId);
+  } else if (userId !== null) {
+    where.push(`p.user_id = $${idx++}`);
+    params.push(userId);
+  } else if (username) {
+    where.push(`LOWER(u.username) = LOWER($${idx++})`);
+    params.push(username);
+  }
+
+  const limitIndex = idx;
+  params.push(limit);
+
+  const sql = `
+    SELECT
+      p.id,
+      p.user_id,
+      p.title,
+      p.content,
+      p.image_url,
+      p.created_at,
+      p.updated_at,
+      u.username AS author_username,
+      COALESCE(pl.likes_count, 0)::int AS likes_count,
+      COALESCE(pc.comments_count, 0)::int AS comments_count,
+      CASE
+        WHEN $1::int IS NULL THEN FALSE
+        ELSE EXISTS (
+          SELECT 1
+          FROM post_likes myl
+          WHERE myl.post_id = p.id AND myl.user_id = $1
+        )
+      END AS liked_by_me,
+      CASE
+        WHEN $1::int IS NULL THEN FALSE
+        ELSE p.user_id = $1
+      END AS is_owner
+    FROM posts p
+    JOIN users u ON u.id = p.user_id
+    LEFT JOIN (
+      SELECT post_id, COUNT(*)::int AS likes_count
+      FROM post_likes
+      GROUP BY post_id
+    ) pl ON pl.post_id = p.id
+    LEFT JOIN (
+      SELECT post_id, COUNT(*)::int AS comments_count
+      FROM post_comments
+      GROUP BY post_id
+    ) pc ON pc.post_id = p.id
+    ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+    ORDER BY p.created_at DESC
+    LIMIT $${limitIndex}
+  `;
+
+  const { rows } = await pool.query(sql, params);
+  return rows;
 }
 
 async function loadComments(postId, viewerId) {
@@ -350,9 +417,14 @@ app.post("/api/auth/login", async (req, res) => {
 });
 
 app.get("/api/me", auth, async (req, res) => {
-  const user = await getUserById(req.user.uid);
-  if (!user) return res.status(401).json({ error: "User not found" });
-  res.json({ user });
+  try {
+    const user = await getUserById(req.user.uid);
+    if (!user) return res.status(401).json({ error: "User not found" });
+    res.json({ user });
+  } catch (e) {
+    console.error("ME ERROR:", e?.message || e);
+    res.status(500).json({ error: "Failed to load current user" });
+  }
 });
 
 app.get("/api/profile/me", auth, async (req, res) => {
@@ -678,4 +750,8 @@ app.get("*", (_req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+});
+
+app.get("/api/version", (_req, res) => {
+  res.json({ version: "community-fix-2026-03-15-01" });
 });
