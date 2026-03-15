@@ -1,8 +1,5 @@
 {
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
-    }
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "https://projectmek-pup.onrender.com/api/$1" }
   ]
 }
