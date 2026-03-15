@@ -102,18 +102,29 @@
     return window.ITLIB_auth?.getToken?.() || localStorage.getItem("token") || "";
   }
 
-  async function api(path, options = {}) {
-    const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
-    const token = getToken();
+  const API_BASE = "https://project-mek-pup.onrender.com";
 
-    if (options.auth && token) headers.Authorization = `Bearer ${token}`;
-    if (options.auth && !token) throw new Error("LOGIN_REQUIRED");
+function toApiUrl(path) {
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${API_BASE}${path}`;
+}
 
-    const res = await fetch(path, { ...options, headers });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
-    return data;
-  }
+async function api(path, options = {}) {
+  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+  const token = getToken();
+
+  if (options.auth && token) headers.Authorization = `Bearer ${token}`;
+  if (options.auth && !token) throw new Error("LOGIN_REQUIRED");
+
+  const res = await fetch(toApiUrl(path), {
+    ...options,
+    headers,
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  return data;
+}
 
   function openLoginModal() {
     if (window.ITLIB_auth?.openLogin) {

@@ -23,15 +23,22 @@
     return state.token ? { Authorization: `Bearer ${state.token}` } : {};
   }
 
-  async function api(path, opts = {}) {
-    const res = await fetch(path, {
-      headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
-      ...opts,
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
-    return data;
-  }
+  const API_BASE = "https://project-mek-pup.onrender.com";
+
+function toApiUrl(path) {
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${API_BASE}${path}`;
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(toApiUrl(path), {
+    headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
+    ...opts,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  return data;
+}
 
   function ensureTopAuthUI() {
     let wrap = document.getElementById("topbarAuth");
