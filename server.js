@@ -108,9 +108,9 @@ async function loadPosts(
   viewerId,
   { postId = null, userId = null, username = null, mine = false, limit = 30 } = {}
 ) {
-  const params = [viewerId ?? null];
   const where = [];
-  let idx = 2;
+  const params = [viewerId ?? null, viewerId ?? null, viewerId ?? null, viewerId ?? null];
+  let idx = 5;
 
   if (postId !== null) {
     where.push(`p.id = $${idx++}`);
@@ -128,8 +128,8 @@ async function loadPosts(
     params.push(username);
   }
 
-  const limitIndex = idx;
   params.push(limit);
+  const limitIndex = params.length;
 
   const sql = `
     SELECT
@@ -141,19 +141,19 @@ async function loadPosts(
       p.created_at,
       p.updated_at,
       u.username AS author_username,
-      COALESCE(pl.likes_count, 0)::int AS likes_count,
-      COALESCE(pc.comments_count, 0)::int AS comments_count,
+      COALESCE(pl.likes_count, 0) AS likes_count,
+      COALESCE(pc.comments_count, 0) AS comments_count,
       CASE
-        WHEN $1::int IS NULL THEN FALSE
+        WHEN $1 IS NULL THEN FALSE
         ELSE EXISTS (
           SELECT 1
           FROM post_likes myl
-          WHERE myl.post_id = p.id AND myl.user_id = $1
+          WHERE myl.post_id = p.id AND myl.user_id = $2
         )
       END AS liked_by_me,
       CASE
-        WHEN $1::int IS NULL THEN FALSE
-        ELSE p.user_id = $1
+        WHEN $3 IS NULL THEN FALSE
+        ELSE p.user_id = $4
       END AS is_owner
     FROM posts p
     JOIN users u ON u.id = p.user_id
